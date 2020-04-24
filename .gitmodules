@@ -1,0 +1,6 @@
+[submodule "third-party/libunwind"]
+	path = third-party/libunwind
+	url = https://github.com/libunwind/libunwind
+[submodule "third-party/gflags"]
+	path = third-party/gflags
+	url = https://github.com/gflags/gflags
