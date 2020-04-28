@@ -124,9 +124,12 @@ bool summary_stacks(unw_addr_space_t* addr_space,
         int32_t pid = stack[0];
         std::string cur_record;
         for (int i = stack.size() - 1; i > 0; --i) {
-            CHECK_NVAL_RET(_UPT_get_proc_name(*addr_space, stack[i], buf, sizeof(buf), nullptr, upt_infos.at(pid)), 0, false);
-            cur_record.append(buf);
-            cur_record.append(";");
+            if (_UPT_get_proc_name(*addr_space, stack[i], buf, sizeof(buf), nullptr, upt_infos.at(pid)) != 0) {
+                cur_record.append("UNKNOWN;");
+            } else {
+                cur_record.append(buf);
+                cur_record.append(";");
+            }
         }
         auto iter = stack_counter.find(cur_record);
         if (iter == stack_counter.end()) {
