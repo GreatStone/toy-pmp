@@ -13,6 +13,7 @@
 #include <endian.h>
 #include <stdint.h>
 #include <unordered_map>
+#include <map>
 
 typedef std::unordered_map<int32_t, void*> UptInfoMap;
 
@@ -115,21 +116,53 @@ bool sampling_stack(unw_addr_space_t* addr_space, void* upt_info, int32_t pid,
     return true;
 }
 
+class ProcNameCache {
+public:
+    void set(int32_t pid, unw_word_t frame, const std::string& proc_name) {
+        auto iter = _cache.find(pid);
+        if (iter == _cache.end()) {
+            iter = _cache.insert(std::make_pair(pid, std::map<unw_word_t, std::string>())).first;
+        }
+        iter->second[frame] = proc_name;
+    }
+    bool get(int32_t pid, unw_word_t frame, std::string* proc_name) {
+        auto iter = _cache.find(pid);
+        if (iter == _cache.end()) {
+            return false;
+        }
+        auto name_iter = iter->second.find(frame);
+        if (name_iter != iter->second.end()) {
+            *proc_name = name_iter->second;
+            return true;
+        }
+        return false;
+    }
+private:
+    std::map<int32_t, std::map<unw_word_t, std::string>> _cache;
+};
+
 bool summary_stacks(unw_addr_space_t* addr_space,
                     const std::list<std::vector<unw_word_t>>& sample_stack,
                     const UptInfoMap& upt_infos) {
     char buf[1024];
+    ProcNameCache name_cache;
     std::unordered_map<std::string, int> stack_counter;
     for (const auto& stack : sample_stack) {
         int32_t pid = stack[0];
         std::string cur_record;
         for (int i = stack.size() - 1; i > 0; --i) {
-            if (_UPT_get_proc_name(*addr_space, stack[i], buf, sizeof(buf), nullptr, upt_infos.at(pid)) != 0) {
-                cur_record.append("UNKNOWN;");
+            std::string cur_proc_name;
+            if (name_cache.get(pid, stack[i], &cur_proc_name)) {
+                // do nothing
+            } else if (_UPT_get_proc_name(*addr_space, stack[i], buf, sizeof(buf),
+                                          nullptr, upt_infos.at(pid)) == 0) {
+                cur_proc_name.assign(buf);
             } else {
-                cur_record.append(buf);
-                cur_record.append(";");
+                cur_proc_name = "UNKNOWN";
             }
+            name_cache.set(pid, stack[i], cur_proc_name);
+            cur_record.append(cur_proc_name);
+            cur_record.push_back(';');
         }
         auto iter = stack_counter.find(cur_record);
         if (iter == stack_counter.end()) {
@@ -146,6 +179,10 @@ bool summary_stacks(unw_addr_space_t* addr_space,
 
 int main(int argc, char* argv[]) {
     google::ParseCommandLineFlags(&argc, &argv, true);
+    if (FLAGS_pid == 0) {
+        printf("Invalid pid 0\n");
+        return -1;
+    }
     unw_accessors_t accessor;
     unw_addr_space_t addr_space;
     if (!init_unwind(&accessor, &addr_space)) {
