@@ -73,7 +73,7 @@ else
     echo "build libgflags succ"
 fi
 
-${CXX} -std=c++11 -g -fomit-frame-pointer -I ${SOURCE_DIR}/deps/include -lpthread -llzma ${SOURCE_DIR}/profiler.cpp ${SOURCE_DIR}/deps/lib/libgflags.a ${SOURCE_DIR}/deps/lib/libunwind-ptrace.a ${SOURCE_DIR}/deps/lib/libunwind-generic.a ${SOURCE_DIR}/deps/lib/libunwind.a -o ${SOURCE_DIR}/pmp -static-libgcc -static-libstdc++
+${CXX} -std=c++11 -g -fomit-frame-pointer -I ${SOURCE_DIR}/deps/include ${SOURCE_DIR}/profiler.cpp ${SOURCE_DIR}/deps/lib/libgflags.a ${SOURCE_DIR}/deps/lib/libunwind-ptrace.a ${SOURCE_DIR}/deps/lib/libunwind-generic.a ${SOURCE_DIR}/deps/lib/libunwind.a -o ${SOURCE_DIR}/pmp -static-libgcc -static-libstdc++ -llzma -lpthread
 if [ $? -ne 0 ]; then
     echo "build pmp failed"
     exit 255

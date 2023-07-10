@@ -24,10 +24,20 @@ DEFINE_int32(attach, 0, "The method of attach child process.\n \
 DEFINE_int32(sample_times, 100, "The number of cycle that get stack of each process.");
 DEFINE_int32(interval, 20, "The duration between samples in milliseconds.");
 
-#define CHECK_NVAL_RET(val, exp, ret)                    \
-    if ((val) != (exp)) {                                 \
-        printf("Operation failed %s:%d "#val" != "#exp" errno=%d\n", __FILE__, __LINE__, errno); \
-        return (ret);                                     \
+#define CHECK_NVAL_RET(val, exp, ret)					\
+    if ((val) != (exp)) {						\
+	char tmp_buf[1024];						\
+	snprintf(tmp_buf, 1023, "Operation failed %s:%d "#val" != "#exp" errno=%d\n", __FILE__, __LINE__, errno); \
+	perror(tmp_buf);						\
+	return (ret);							\
+    }
+
+#define CHECK_NVAL_GOSUM(val, exp, ret)					\
+    if ((val) != (exp)) {						\
+        char tmp_buf[1024];						\
+	snprintf(tmp_buf, 1023, "Operation failed %s:%d "#val" != "#exp" errno=%d gosummary\n", __FILE__, __LINE__, errno); \
+	perror(tmp_buf);						\
+	goto summary;							\
     }
 
 
@@ -180,13 +190,24 @@ bool summary_stacks(unw_addr_space_t* addr_space,
 int main(int argc, char* argv[]) {
     google::ParseCommandLineFlags(&argc, &argv, true);
     if (FLAGS_pid == 0) {
-        printf("Invalid pid 0\n");
-        return -1;
+	if (argc > 1) {
+	    int fork_pid = fork();
+	    if (fork_pid == 0) {
+		execvp(argv[1], argv + 1);
+		exit(0);
+	    }
+	    FLAGS_pid = fork_pid;
+	} else {
+	    perror("invalid argument provided");
+	    perror("\tsample(attach to exist proc): ./pmp -pid=12345 -attach=1 -sample_times=100 -interval=20");
+	    perror("\tsample(create new proc): ./pmp -attach=1 -sample_times=100 -interval=20 ./hello_world");
+	    return -1;
+	}
     }
     unw_accessors_t accessor;
     unw_addr_space_t addr_space;
     if (!init_unwind(&accessor, &addr_space)) {
-        printf("init libunwind failed\n");
+        perror("init libunwind failed");
         return -1;
     }
     UptInfoMap upt_infos;
@@ -194,10 +215,15 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < FLAGS_sample_times; ++i) {
         std::vector<int32_t> task_list;
         if (FLAGS_attach == 0) {
+	    std::vector<int32_t> test_list;
+	    if (!list_child_task(FLAGS_pid, &test_list)){
+		perror("meet an invalid proc id");
+		return -1;
+	    }
             task_list.push_back(FLAGS_pid);
         } else {
             if (!list_child_task(FLAGS_pid, &task_list)) {
-                printf("Fail to fetch all child task of %d\n", FLAGS_pid);
+		perror("Fail to fetch all child task");
                 return -1;
             }
         }
@@ -211,41 +237,42 @@ int main(int argc, char* argv[]) {
             std::vector<int32_t> traceable_task;
             traceable_task.reserve(task_list.size());
             for (const auto& pid : task_list) {
-                CHECK_NVAL_RET(attach_task(pid, &exited), true, -1);
+                CHECK_NVAL_GOSUM(attach_task(pid, &exited), true, -1);
                 if (!exited) {
                     traceable_task.push_back(pid);
                 }
             }
             for (const auto& pid : traceable_task) {
-                CHECK_NVAL_RET(waitpid(pid, nullptr, __WALL), pid, -1);
+                CHECK_NVAL_GOSUM(waitpid(pid, nullptr, __WALL), pid, -1);
             }
             for (const auto& pid : traceable_task) {
                 std::vector<unw_word_t> frames;
-                CHECK_NVAL_RET(sampling_stack(&addr_space, upt_infos[pid], pid, &frames), true, -1);
+                CHECK_NVAL_GOSUM(sampling_stack(&addr_space, upt_infos[pid], pid, &frames), true, -1);
                 sample_stack.push_back(std::move(frames));
                 if (!detach_task(pid)) {
-                    printf("detach %d failed\n", pid);
+                    perror("detach failed");
                 }
             }
         } else { // attach and trace childs by turn.
             for (const auto& pid : task_list) {
                 bool exited = false;
-                CHECK_NVAL_RET(attach_task(pid, &exited), true, -1);
+                CHECK_NVAL_GOSUM(attach_task(pid, &exited), true, -1);
                 if (exited) {
                     continue;
                 }
-                CHECK_NVAL_RET(waitpid(pid, nullptr, __WALL), pid, -1);
+                CHECK_NVAL_GOSUM(waitpid(pid, nullptr, __WALL), pid, -1);
                 std::vector<unw_word_t> frames;
-                CHECK_NVAL_RET(sampling_stack(&addr_space, upt_infos[pid], pid, &frames), true, -1);
+                CHECK_NVAL_GOSUM(sampling_stack(&addr_space, upt_infos[pid], pid, &frames), true, -1);
                 sample_stack.push_back(std::move(frames));
                 if (!detach_task(pid)) {
-                    printf("detach %d failed\n", pid);
+                    printf("detach failed");
                 }
             }
         }
         usleep(FLAGS_interval * 1000ul);
     }
 
+ summary:
     summary_stacks(&addr_space, sample_stack, upt_infos);
     return 0;
 }
